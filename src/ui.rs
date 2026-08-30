@@ -67,10 +67,18 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> bool {
             KeyCode::Char('t') => app.enter_town(),
             KeyCode::Char('m') => app.move_camp(),
             KeyCode::Char('a') => app.screen = Screen::Almanac,
+            KeyCode::Char('e') => app.screen = Screen::Crew,
             KeyCode::Char('+') | KeyCode::Char('=') => app.zoom_in(),
             KeyCode::Char('-') | KeyCode::Char('_') => app.zoom_out(),
             KeyCode::Char('?') => app.screen = Screen::Help,
             KeyCode::Char('q') => return true,
+            _ => {}
+        },
+        Screen::Crew => match key.code {
+            KeyCode::Esc | KeyCode::Char('e') | KeyCode::Char('q') => {
+                app.screen = Screen::Play;
+            }
+            KeyCode::Char('?') => app.screen = Screen::Help,
             _ => {}
         },
         Screen::Town => match key.code {
@@ -124,6 +132,10 @@ pub fn draw(frame: &mut Frame, app: &App) {
         Screen::Town => {
             draw_play(frame, app);
             draw_town(frame, app);
+        }
+        Screen::Crew => {
+            draw_play(frame, app);
+            draw_crew(frame, app);
         }
         Screen::Almanac => draw_almanac(frame, app),
         Screen::Help => draw_help(frame),
@@ -215,7 +227,7 @@ fn draw_play(frame: &mut Frame, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(4),
+            Constraint::Length(5),
             Constraint::Min(8),
             Constraint::Length(6),
             Constraint::Length(2),
@@ -274,7 +286,7 @@ fn draw_play(frame: &mut Frame, app: &App) {
     );
 
     frame.render_widget(
-        Paragraph::new("hjkl move  HJKL jump  +/- zoom  f fish  c camp/mend  . wait  d deliver  t town  m move-camp  a almanac  ? help  q quit"),
+        Paragraph::new("hjkl move  HJKL jump  +/- zoom  f fish  c camp/mend  . wait  d deliver  t town  m move-camp  e crew  a almanac  ? help  q quit"),
         chunks[3],
     );
 }
@@ -351,6 +363,80 @@ fn map_lines(app: &App, area: Rect) -> Vec<Line<'static>> {
             )
         })
         .collect()
+}
+
+fn bar(value: i32, width: usize) -> String {
+    let v = value.clamp(0, 100) as usize;
+    let filled = (v * width) / 100;
+    format!("{}{}", "█".repeat(filled), "░".repeat(width.saturating_sub(filled)))
+}
+
+fn draw_crew(frame: &mut Frame, app: &App) {
+    let Some(g) = &app.game else {
+        return;
+    };
+    let n = g.company.hands.len();
+    let h = (20 + n as u16 * 5).min(frame.area().height.saturating_sub(2));
+    let area = centered(frame.area(), 72, h);
+    let mut body = vec![
+        Line::from("Game characters on a small Kodiak fish-camp crew — not real 2025 permit holders."),
+        Line::from(""),
+    ];
+    for c in &g.company.hands {
+        body.push(Line::from(Span::styled(
+            format!("  {:<8}  {}", c.name, c.role.label()),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )));
+        body.push(Line::from(format!(
+            "    sleep      {}  {}",
+            bar(c.sleep, 10),
+            c.sleep_word()
+        )));
+        body.push(Line::from(format!(
+            "    hunger     {}  {}",
+            bar(c.fed(), 10),
+            c.hunger_word()
+        )));
+        body.push(Line::from(format!(
+            "    motivation {}  {}",
+            bar(c.morale(), 10),
+            c.motivation_word()
+        )));
+        body.push(Line::from(""));
+    }
+    body.push(Line::from(Span::styled(
+        "Camp stores",
+        Style::default().add_modifier(Modifier::BOLD),
+    )));
+    for line in g.company.stores.lines() {
+        body.push(Line::from(line));
+    }
+    body.push(Line::from(""));
+    body.push(Line::from(format!(
+        "Mean sleep {}  hunger {}  morale {}   town/play {}   camp streak {}",
+        g.company.mean_sleep(),
+        g.company.mean_hunger(),
+        g.company.mean_morale(),
+        g.company.town_play,
+        g.company.camp_streak
+    )));
+    body.push(Line::from(
+        "Feed them. Sit closures on the beach. Rest after a long opener.",
+    ));
+    body.push(Line::from("e / Esc  back to chart"));
+    frame.render_widget(Clear, area);
+    frame.render_widget(
+        Paragraph::new(body)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" Crew / supplies "),
+            )
+            .wrap(Wrap { trim: false }),
+        area,
+    );
 }
 
 fn draw_town(frame: &mut Frame, app: &App) {
@@ -458,7 +544,13 @@ fn draw_help(frame: &mut Frame) {
         Line::from("d               deliver the hold to a tender"),
         Line::from("t               town menu if you are on an OSM village/city"),
         Line::from("m               move fish camp to the nearest legal site"),
+        Line::from("e               crew / supplies — sleep, hunger, motivation, camp stores"),
         Line::from("a               official 2025 season almanac"),
+        Line::from(""),
+        Line::from("Crew are game characters (skipper plus relatives/hands on a small Kodiak"),
+        Line::from("fish-camp crew), not real 2025 permit holders. Feed them. Sit closures at"),
+        Line::from("camp. After a long opener they need sleep — exhausted hands fish worse"),
+        Line::from("and quit. Too much town or playtime and they walk."),
         Line::from(""),
         Line::from("S04K setnet is legal only in the Central Section (Uganik, Uyak, Amook"),
         Line::from("Pass, Terror, Zachar) and inner Alitak until 4 September."),
@@ -587,6 +679,31 @@ mod tests {
         let kma = dump(&app, 120, 36);
         assert!(kma.contains("KMA") || kma.contains("2km") || kma.contains("Chart"));
         let _ = std::fs::write("/opt/cursor/artifacts/harvester_kma_zoom.txt", &kma);
+    }
+
+    #[test]
+    fn crew_key_opens_panel_with_names_and_bars() {
+        let mut app = App::new(1);
+        app.pick_gear = 0;
+        app.pick_site = 0;
+        app.start_game();
+        handle_key(&mut app, KeyEvent::from(KeyCode::Char('e')));
+        assert_eq!(app.screen, crate::app::Screen::Crew);
+        let s = dump(&app, 120, 40);
+        assert!(s.contains("Mara"));
+        assert!(s.contains("Iosif"));
+        assert!(s.contains("Denny"));
+        assert!(s.contains("skipper"));
+        assert!(s.contains("sleep"));
+        assert!(s.contains("hunger"));
+        assert!(s.contains("motivation"));
+        assert!(s.contains("Food"));
+        assert!(s.contains("Coffee"));
+        assert!(s.contains("Stove"));
+        assert!(s.contains("not real 2025") || s.contains("Game characters"));
+        let _ = std::fs::write("/opt/cursor/artifacts/harvester_crew_panel.txt", &s);
+        handle_key(&mut app, KeyEvent::from(KeyCode::Esc));
+        assert_eq!(app.screen, crate::app::Screen::Play);
     }
 }
 

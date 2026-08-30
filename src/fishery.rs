@@ -139,12 +139,14 @@ pub fn can_fish(
 }
 
 /// One fishing day for a single permit. Not an official district harvest.
+/// `crew_factor` is 0.35–1.0 from sleep / hunger / motivation (exhausted hands pick less).
 pub fn fish_day(
     rng: &mut impl Rng,
     date: NaiveDate,
     gear: Gear,
     section: Section,
     weather: &DayWeather,
+    crew_factor: f64,
 ) -> Catch {
     let weather_mod = if weather.wind_kt >= 25.0 || weather.seas_ft >= 8.0 {
         0.35
@@ -157,8 +159,9 @@ pub fn fish_day(
         Gear::Setnet => 1.0,
         Gear::PurseSeine => 6.5,
     };
+    let crew_mod = crew_factor.clamp(0.35, 1.0);
     // Peak setnet pink day ~120 fish in a strong 2025 NW opening; scaled by timing.
-    let base = 90.0 * gear_mod * weather_mod;
+    let base = 90.0 * gear_mod * weather_mod * crew_mod;
 
     let sockeye = (timing("sockeye_early", date) * strength(section, "sockeye_early")
         + timing("sockeye_late", date) * strength(section, "sockeye_late"))
@@ -217,7 +220,19 @@ mod tests {
         let w = load();
         let weather = w.get("2025-07-07").unwrap();
         let d = NaiveDate::from_ymd_opt(2025, 7, 7).unwrap();
-        let c = fish_day(&mut rng, d, Gear::PurseSeine, Section::Eastside, weather);
+        let c = fish_day(&mut rng, d, Gear::PurseSeine, Section::Eastside, weather, 1.0);
         assert_eq!(c.chinook, 0);
+    }
+
+    #[test]
+    fn exhausted_crew_pick_fewer() {
+        let w = load();
+        let weather = w.get("2025-07-07").unwrap();
+        let d = NaiveDate::from_ymd_opt(2025, 7, 7).unwrap();
+        let mut fresh = rand::rngs::StdRng::seed_from_u64(9);
+        let mut tired = rand::rngs::StdRng::seed_from_u64(9);
+        let a = fish_day(&mut fresh, d, Gear::Setnet, Section::Central, weather, 1.0);
+        let b = fish_day(&mut tired, d, Gear::Setnet, Section::Central, weather, 0.40);
+        assert!(b.total() <= a.total());
     }
 }

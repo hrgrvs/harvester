@@ -22,6 +22,7 @@ pub enum Screen {
     PickSite,
     Play,
     Town,
+    Crew,
     Almanac,
     Help,
     GameOver,
@@ -101,10 +102,6 @@ impl App {
             Gear::Setnet => 1_800_000,
             Gear::PurseSeine => 4_500_000,
         };
-        let names: &[&str] = match gear {
-            Gear::Setnet => &["Mara", "Iosif", "Denny"],
-            Gear::PurseSeine => &["Mara", "Iosif", "Denny", "Ruth"],
-        };
         let mut game = Game {
             date: season_start(),
             gear,
@@ -116,7 +113,7 @@ impl App {
             hold: Catch::default(),
             landed: Catch::default(),
             fuel: 40,
-            company: Company::new(names),
+            company: Company::starter(gear == Gear::Setnet),
             engine_dead: false,
             net_tangled: false,
             log: Vec::new(),
@@ -253,7 +250,9 @@ impl App {
                 Self::push_log(g, "Otters still in the gear. Mend at camp (c) first.")
             }
             Ok(()) => {
-                let c = fish_day(&mut self.rng, g.date, g.gear, section, &weather);
+                let factor = g.company.fishing_factor();
+                let wrecked = g.company.mean_sleep() < 25;
+                let c = fish_day(&mut self.rng, g.date, g.gear, section, &weather, factor);
                 g.hold.add_assign(c);
                 Self::push_log(
                     g,
@@ -263,6 +262,9 @@ impl App {
                         c.chinook, c.sockeye, c.coho, c.pink, c.chum
                     ),
                 );
+                if wrecked {
+                    Self::push_log(g, "Crew is exhausted. They fished worse. Sit camp and sleep.");
+                }
                 match wildlife::roll(&mut self.rng, g.gear, &mut g.hold) {
                     WildlifeEvent::OttersInNet => {
                         g.net_tangled = true;
@@ -284,7 +286,7 @@ impl App {
                     }
                     WildlifeEvent::None => {}
                 }
-                g.company.day_at_camp(true);
+                g.company.after_opener(true);
                 self.finish_day();
             }
         }
@@ -347,9 +349,8 @@ impl App {
             return;
         }
         g.cash -= 12_000;
-        g.company.food_days += 7;
-        g.company.town_resupply();
-        Self::push_log(g, "Bought a week's food. Get back to camp.");
+        g.company.restock_town();
+        Self::push_log(g, "Bought a week's food and restocked coffee and stove fuel. Get back to camp.");
         self.finish_day();
         self.screen = Screen::Play;
     }
@@ -422,8 +423,11 @@ impl App {
 
     fn finish_day(&mut self) {
         let Some(g) = self.game.as_mut() else { return };
-        if g.company.food_days <= 0 {
+        if g.company.food_days() <= 0 {
             Self::push_log(g, "No food. Morale is falling. Get groceries or they walk.");
+        }
+        if g.company.mean_sleep() < 25 {
+            Self::push_log(g, "Crew needs sleep. A long opener without rest and they walk.");
         }
         let quits = g.company.maybe_quit(&mut self.rng);
         for q in quits {
@@ -483,12 +487,14 @@ impl App {
                 map::zoom_name(g.zoom)
             ),
             format!(
-                "cash {}  hold {} fish  landed {}  food {}d  fuel {}  morale {}  town/play {}  crew {}",
+                "cash {}  hold {} fish  landed {}  food {}d  fuel {}  sleep {}  hunger {}  morale {}  town/play {}  crew {}  e panel",
                 format_money(g.cash),
                 g.hold.total(),
                 g.landed.total(),
-                g.company.food_days,
+                g.company.food_days(),
                 g.fuel,
+                g.company.mean_sleep(),
+                g.company.mean_hunger(),
                 g.company.mean_morale(),
                 g.company.town_play,
                 g.company.hands.len()
@@ -543,5 +549,19 @@ mod tests {
         assert!(app.on_camp());
         let section = app.here_section().unwrap();
         assert!(gear_legal(Gear::Setnet, section, false));
+    }
+
+    #[test]
+    fn starter_crew_are_game_characters() {
+        let mut app = App::new(7);
+        app.pick_gear = 0;
+        app.pick_site = 0;
+        app.start_game();
+        let g = app.game.as_ref().unwrap();
+        let names: Vec<_> = g.company.hands.iter().map(|h| h.name).collect();
+        assert_eq!(names, vec!["Mara", "Iosif", "Denny"]);
+        assert_eq!(g.company.hands[0].role.label(), "skipper");
+        assert!(g.company.stores.food_days > 0);
+        assert!(g.company.stores.coffee_tins > 0);
     }
 }

@@ -31,12 +31,13 @@ c          camp / mend — keep the crew here during closures
 d          deliver the hold
 t          town (only on an OSM village or city)
 m          move fish camp to the nearest legal site
+e          crew / supplies — names, sleep, hunger, motivation, camp stores
 a          official 2025 almanac
 ?          help
 q          quit
 ```
 
-Too much town or playtime and the crew quit. No food and they quit. A closure is for mending gear on the beach.
+Too much town or playtime and the crew quit. No food and they quit. A closure is for mending gear on the beach. After a long opener they need sleep — exhausted crew fish worse and walk. `e` opens the crew panel (visible bars, not a log dump). Hands are game characters on a small Kodiak fish-camp crew (skipper plus relatives), not real 2025 permit holders.
 
 ## Install
 
