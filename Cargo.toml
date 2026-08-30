@@ -1,0 +1,24 @@
+[package]
+name = "harvester"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+description = "Kodiak, Alaska commercial salmon fishing-empire TUI (KMA, 2025)"
+license = "MIT"
+repository = "https://github.com/hrgrvs/harvester"
+readme = "README.md"
+keywords = ["tui", "game", "kodiak", "salmon", "alaska"]
+categories = ["games", "command-line-utilities"]
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
+crossterm = "0.28"
+rand = "0.8"
+ratatui = "=0.28.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
