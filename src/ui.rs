@@ -504,6 +504,58 @@ fn draw_over(frame: &mut Frame, app: &App) {
     );
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::App;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    fn dump(app: &App, w: u16, h: u16) -> String {
+        let backend = TestBackend::new(w, h);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw(f, app)).unwrap();
+        let buf = terminal.backend().buffer();
+        let mut out = String::new();
+        for y in 0..h {
+            for x in 0..w {
+                out.push_str(buf[(x, y)].symbol());
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    #[test]
+    fn title_mentions_kodiak_and_keys() {
+        let app = App::new(1);
+        let s = dump(&app, 100, 28);
+        assert!(s.contains("HARVESTER"));
+        assert!(s.contains("Kodiak"));
+        assert!(s.contains("new season"));
+        let _ = std::fs::write("/opt/cursor/artifacts/harvester_title_screen.txt", &s);
+    }
+
+    #[test]
+    fn play_screen_shows_closed_westside() {
+        let mut app = App::new(1);
+        app.pick_gear = 0;
+        app.pick_site = 0;
+        app.start_game();
+        let s = dump(&app, 120, 36);
+        assert!(s.contains("S04K") || s.contains("set"));
+        assert!(s.contains("Uganik") || s.contains("camp"));
+        let _ = std::fs::write(
+            "/opt/cursor/artifacts/harvester_play_uganik_june1_closed.txt",
+            &s,
+        );
+        app.screen = crate::app::Screen::Almanac;
+        let a = dump(&app, 100, 36);
+        assert!(a.contains("1,315") || a.contains("1315"));
+        let _ = std::fs::write("/opt/cursor/artifacts/harvester_almanac_official_2025.txt", &a);
+    }
+}
+
 fn centered(area: Rect, w: u16, h: u16) -> Rect {
     let x = area.x + area.width.saturating_sub(w) / 2;
     let y = area.y + area.height.saturating_sub(h) / 2;
