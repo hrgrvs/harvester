@@ -14,6 +14,8 @@ It is a commercial fishing-empire TUI, not a village-life sim. You are not requi
 
 **Weather.** PADQ (Kodiak Airport), NDBC 46077 (Shelikof Strait), and NWS coastal-waters zones PKZ132 / PKZ138 (CWFAER). Chart names are OSM names only.
 
+**Chart.** Real OSM coastline for the whole Kodiak Management Area (5 AAC 18.100), including Mainland and Shelikof — not a cartoon island. Zoom with `+` / `-`. World view is ~2 km per cell; island view ~500 m; harbor view rebuilds at ~80 m so St. Paul Harbor, Womens Bay, and the westside beaches keep their shape. Ugak and Alitak are bays, not towns.
+
 Native terminal app for Omarchy/Arch (home), macOS, and Windows. After install you just run `harvester`.
 
 ## Play
@@ -21,6 +23,8 @@ Native terminal app for Omarchy/Arch (home), macOS, and Windows. After install y
 ```
 n          new season
 hjkl       walk the chart (HJKL jumps)
++  =       zoom in  (KMA → island → harbor; harbor is a fresh ~80 m raster)
+-  _       zoom out (harbor → island → whole KMA, including Mainland/Shelikof)
 f          fish (if that section is open and your gear is legal)
 c          camp / mend — keep the crew here during closures
 .          wait a day
@@ -76,7 +80,7 @@ cargo run --release
 
 Development continues on Origin. This public GitHub repository is the password-free clone for players.
 
-Official sources used in the data files are listed in [`data/SOURCES.md`](data/SOURCES.md). Map: © OpenStreetMap contributors.
+Official sources used in the data files are listed in [`data/SOURCES.md`](data/SOURCES.md). Chart: OSM `natural=coastline` and OSM names only (© OpenStreetMap contributors, ODbL).
 
 ## License
 

@@ -74,9 +74,19 @@ coho 7.1 lb / $0.70; pink 3.2 lb / $0.30; chum 6.5 lb / $0.39.
 
 ## Map
 
-Island outlines and place names from OpenStreetMap / Nominatim.
-© OpenStreetMap contributors. Names drawn on the TUI are OSM names only.
-Clip is the KMA description in 5 AAC 18.100.
+OSM `natural=coastline` ways (Overpass, KMA bbox) rasterized at three
+resolutions: KMA ~2 km, archipelago ~500 m, harbor viewport ~80 m (vector
+coastline, not a stretched coarse grid). Names are OSM tags only. Ugak Bay
+and Alitak Bay are bays, not towns. Clip is 5 AAC 18.100 (Cape Douglas,
+150°W, 55°30′N, Kilokak Rocks), including Mainland / Shelikof.
+
+NOAA NSDE/CUSP harbor shapefiles were not available as a direct download
+from this build environment; OSM coastline is the chart source of truth.
+GEBCO/NOAA DEM is not painted (coverage is the NE city / Ouzinkie / Chiniak
+corner only). ADF&G statistical charts were used as overlay reference only
+and are not labeled on the TUI.
+
+© OpenStreetMap contributors (ODbL).
 
 ## Weather
 

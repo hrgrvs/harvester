@@ -9,7 +9,7 @@ use crate::app::{App, Screen};
 use crate::data::season;
 use crate::economy::{format_money, value_cents};
 use crate::geography::SITES;
-use crate::map::{self, tile};
+use crate::map;
 use crate::weather;
 
 pub fn handle_key(app: &mut App, key: KeyEvent) -> bool {
@@ -67,6 +67,8 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> bool {
             KeyCode::Char('t') => app.enter_town(),
             KeyCode::Char('m') => app.move_camp(),
             KeyCode::Char('a') => app.screen = Screen::Almanac,
+            KeyCode::Char('+') | KeyCode::Char('=') => app.zoom_in(),
+            KeyCode::Char('-') | KeyCode::Char('_') => app.zoom_out(),
             KeyCode::Char('?') => app.screen = Screen::Help,
             KeyCode::Char('q') => return true,
             _ => {}
@@ -238,7 +240,15 @@ fn draw_play(frame: &mut Frame, app: &App) {
 
     frame.render_widget(
         Paragraph::new(map_lines(app, chunks[1]))
-            .block(Block::default().borders(Borders::ALL).title(" Chart ")),
+            .block(
+                Block::default().borders(Borders::ALL).title(format!(
+                    " Chart · {} · OSM coastline · +/- zoom ",
+                    app.game
+                        .as_ref()
+                        .map(|g| map::zoom_name(g.zoom))
+                        .unwrap_or("KMA")
+                )),
+            ),
         chunks[1],
     );
 
@@ -264,7 +274,7 @@ fn draw_play(frame: &mut Frame, app: &App) {
     );
 
     frame.render_widget(
-        Paragraph::new("hjkl move  HJKL jump  f fish  c camp/mend  . wait  d deliver  t town  m move-camp  a almanac  ? help  q quit"),
+        Paragraph::new("hjkl move  HJKL jump  +/- zoom  f fish  c camp/mend  . wait  d deliver  t town  m move-camp  a almanac  ? help  q quit"),
         chunks[3],
     );
 }
@@ -278,35 +288,38 @@ fn map_lines(app: &App, area: Rect) -> Vec<Line<'static>> {
     if vw < 4 || vh < 4 {
         return Vec::new();
     }
-    let x0 = (g.x - vw / 2).clamp(0, (app.map.width - vw).max(0));
-    let y0 = (g.y - vh / 2).clamp(0, (app.map.height - vh).max(0));
-
-    let mut rows: Vec<Vec<(char, Color)>> = Vec::new();
-    for y in y0..y0 + vh {
-        let mut row = Vec::new();
-        for x in x0..x0 + vw {
-            let ch = tile(&app.map, x, y);
-            let color = match ch {
-                '~' => Color::Cyan,
-                '#' => Color::Yellow,
-                '.' => Color::Green,
-                _ => Color::DarkGray,
-            };
-            row.push((ch, color));
-        }
-        rows.push(row);
+    let (view, tiles, px, py) = map::raster_window(&app.map, g.zoom, g.lon, g.lat, vw, vh);
+    let mut rows: Vec<Vec<(char, Color)>> = tiles
+        .iter()
+        .map(|row| {
+            row.chars()
+                .map(|ch| {
+                    let color = match ch {
+                        '~' => Color::Cyan,
+                        '#' => Color::Yellow,
+                        '.' => Color::Green,
+                        _ => Color::DarkGray,
+                    };
+                    (ch, color)
+                })
+                .collect()
+        })
+        .collect();
+    if rows.is_empty() {
+        return Vec::new();
     }
 
     let put = |rows: &mut Vec<Vec<(char, Color)>>, x: i32, y: i32, ch: char, color: Color| {
-        let xi = x - x0;
-        let yi = y - y0;
-        if yi >= 0 && xi >= 0 && (yi as usize) < rows.len() && (xi as usize) < rows[0].len() {
-            rows[yi as usize][xi as usize] = (ch, color);
+        if y >= 0 && x >= 0 && (y as usize) < rows.len() && (x as usize) < rows[0].len() {
+            rows[y as usize][x as usize] = (ch, color);
         }
     };
 
     for s in SITES {
-        let (sx, sy) = map::latlon_to_tile(&app.map, s.lon, s.lat);
+        if s.lon < view.west || s.lon > view.east || s.lat < view.south || s.lat > view.north {
+            continue;
+        }
+        let (fx, fy) = map::lonlat_to_xy(&view, vw, vh, s.lon, s.lat);
         let ch = if s.town && !s.camp {
             '■'
         } else if s.camp {
@@ -314,17 +327,13 @@ fn map_lines(app: &App, area: Rect) -> Vec<Line<'static>> {
         } else {
             '+'
         };
-        put(&mut rows, sx, sy, ch, Color::White);
+        put(&mut rows, fx.round() as i32, fy.round() as i32, ch, Color::White);
     }
-    put(&mut rows, g.x, g.y, '@', Color::Magenta);
+    put(&mut rows, px, py, '@', Color::Magenta);
 
-    // Labels that fall in view (OSM names).
-    for lab in &app.map.labels {
-        if lab.x < x0 || lab.y < y0 || lab.x >= x0 + vw || lab.y >= y0 + vh {
-            continue;
-        }
-        let yi = (lab.y - y0) as usize;
-        let mut xi = (lab.x - x0 + 1) as usize;
+    for (lab, x, y) in map::labels_in_view(&app.map, &view, g.zoom, vw, vh) {
+        let mut xi = (x + 1) as usize;
+        let yi = y as usize;
         for ch in lab.name.chars() {
             if yi < rows.len() && xi < rows[yi].len() {
                 rows[yi][xi] = (ch, Color::Gray);
@@ -441,6 +450,8 @@ fn draw_help(frame: &mut Frame) {
         Line::from("Kodiak Management Area, year 2025."),
         Line::from(""),
         Line::from("hjkl / arrows   walk the OSM chart     HJKL  jump"),
+        Line::from("+ / =           zoom in  (island → harbor detail, ~80 m)"),
+        Line::from("- / _           zoom out (archipelago → whole KMA ~2 km)"),
         Line::from("f               fish if the section is open and your gear is legal"),
         Line::from("c               camp / mend  (keep crew here during closures)"),
         Line::from(".               wait a day"),
@@ -553,6 +564,29 @@ mod tests {
         let a = dump(&app, 100, 36);
         assert!(a.contains("1,315") || a.contains("1315"));
         let _ = std::fs::write("/opt/cursor/artifacts/harvester_almanac_official_2025.txt", &a);
+    }
+
+    #[test]
+    fn zoom_keys_and_harbor_detail() {
+        let mut app = App::new(1);
+        app.pick_gear = 0;
+        app.pick_site = 0;
+        app.start_game();
+        assert_eq!(app.game.as_ref().unwrap().zoom, 1);
+        handle_key(
+            &mut app,
+            KeyEvent::from(KeyCode::Char('+')),
+        );
+        assert_eq!(app.game.as_ref().unwrap().zoom, 2);
+        let harbor = dump(&app, 120, 36);
+        assert!(harbor.contains("80") || harbor.contains("harbor") || harbor.contains("Chart"));
+        let _ = std::fs::write("/opt/cursor/artifacts/harvester_harbor_zoom.txt", &harbor);
+        handle_key(&mut app, KeyEvent::from(KeyCode::Char('_')));
+        handle_key(&mut app, KeyEvent::from(KeyCode::Char('-')));
+        assert_eq!(app.game.as_ref().unwrap().zoom, 0);
+        let kma = dump(&app, 120, 36);
+        assert!(kma.contains("KMA") || kma.contains("2km") || kma.contains("Chart"));
+        let _ = std::fs::write("/opt/cursor/artifacts/harvester_kma_zoom.txt", &kma);
     }
 }
 

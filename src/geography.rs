@@ -1,6 +1,6 @@
 //! KMA geography: 5 AAC 18.100 / 18.200 / 18.330. OSM names only on the map.
 
-use crate::map::{latlon_to_tile, MapData};
+use crate::map;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Gear {
@@ -250,9 +250,9 @@ pub const SITES: &[Site] = &[
     },
     Site {
         id: "amook-pass",
-        osm_name: "Amook Pass",
-        lon: -153.8500,
-        lat: 57.4300,
+        osm_name: "Amook Bay",
+        lon: -153.8252,
+        lat: 57.4725,
         section: Section::Central,
         camp: true,
         town: false,
@@ -389,8 +389,8 @@ pub fn nearest_site(lon: f64, lat: f64) -> &'static Site {
         .unwrap()
 }
 
-pub fn site_tile(map: &MapData, site: &Site) -> (i32, i32) {
-    latlon_to_tile(map, site.lon, site.lat)
+pub fn site_near(site: &Site, lon: f64, lat: f64, meters: f64) -> bool {
+    map::haversine_m(site.lon, site.lat, lon, lat) <= meters
 }
 
 /// Coarse section from lon/lat using 5 AAC 18.200 latitudes/longitudes.
@@ -510,7 +510,7 @@ mod tests {
     fn camps_are_legal_for_setnet() {
         let camps = camps_for(Gear::Setnet);
         assert!(camps.iter().any(|s| s.osm_name == "Uganik Bay"));
-        assert!(camps.iter().any(|s| s.osm_name == "Amook Pass"));
+        assert!(camps.iter().any(|s| s.osm_name == "Amook Bay"));
         assert!(camps.iter().any(|s| s.osm_name == "Olga Bay"));
         assert!(camps.iter().all(|s| gear_legal(Gear::Setnet, s.section, false)));
         assert!(!camps.iter().any(|s| s.osm_name == "Kodiak"));

@@ -8,10 +8,10 @@ use crate::crew::Company;
 use crate::economy::{format_money, value_cents};
 use crate::fishery::{can_fish, fish_day, Catch, FishError};
 use crate::geography::{
-    camps_for, gear_legal, nearest_site, section_at, site_by_id, site_tile, Gear, Section, Site,
+    camps_for, gear_legal, nearest_site, section_at, site_by_id, site_near, Gear, Section, Site,
     SITES,
 };
-use crate::map::{self, latlon_to_tile, tile_to_latlon, MapData};
+use crate::map::{self, MapData, ZOOM_MAX};
 use crate::weather::{self, DayWeather};
 use crate::wildlife::{self, WildlifeEvent};
 
@@ -32,8 +32,9 @@ pub struct Game {
     pub date: NaiveDate,
     pub gear: Gear,
     pub camp_id: String,
-    pub x: i32,
-    pub y: i32,
+    pub lon: f64,
+    pub lat: f64,
+    pub zoom: u8,
     pub cash: i64,
     pub hold: Catch,
     pub landed: Catch,
@@ -96,7 +97,6 @@ impl App {
         let gear = Self::gear_choices()[self.pick_gear].0;
         let camps = camps_for(gear);
         let site = camps[self.pick_site.min(camps.len().saturating_sub(1))];
-        let (x, y) = site_tile(&self.map, site);
         let cash = match gear {
             Gear::Setnet => 1_800_000,
             Gear::PurseSeine => 4_500_000,
@@ -109,8 +109,9 @@ impl App {
             date: season_start(),
             gear,
             camp_id: site.id.to_string(),
-            x,
-            y,
+            lon: site.lon,
+            lat: site.lat,
+            zoom: 1,
             cash,
             hold: Catch::default(),
             landed: Catch::default(),
@@ -146,8 +147,7 @@ impl App {
 
     pub fn here_section(&self) -> Option<Section> {
         let g = self.game.as_ref()?;
-        let (lon, lat) = tile_to_latlon(&self.map, g.x, g.y);
-        Some(section_at(lon, lat))
+        Some(section_at(g.lon, g.lat))
     }
 
     pub fn on_camp(&self) -> bool {
@@ -155,19 +155,30 @@ impl App {
         let Some(c) = site_by_id(&g.camp_id) else {
             return false;
         };
-        let (cx, cy) = site_tile(&self.map, c);
-        (g.x - cx).abs() <= 2 && (g.y - cy).abs() <= 2
+        site_near(c, g.lon, g.lat, 700.0)
     }
 
     pub fn nearby_town(&self) -> Option<&'static Site> {
         let g = self.game.as_ref()?;
-        SITES.iter().find(|s| {
-            if !s.town {
-                return false;
+        SITES
+            .iter()
+            .find(|s| s.town && site_near(s, g.lon, g.lat, 900.0))
+    }
+
+    pub fn zoom_in(&mut self) {
+        if let Some(g) = self.game.as_mut() {
+            if g.zoom < ZOOM_MAX {
+                g.zoom += 1;
             }
-            let (tx, ty) = site_tile(&self.map, s);
-            (g.x - tx).abs() <= 2 && (g.y - ty).abs() <= 2
-        })
+        }
+    }
+
+    pub fn zoom_out(&mut self) {
+        if let Some(g) = self.game.as_mut() {
+            if g.zoom > 0 {
+                g.zoom -= 1;
+            }
+        }
     }
 
     pub fn move_by(&mut self, dx: i32, dy: i32) {
@@ -176,10 +187,14 @@ impl App {
             Self::push_log(g, "Engine is dead. A whale pod stove it. Tow to town or wait for a skiff.");
             return;
         }
-        let nx = (g.x + dx).clamp(0, self.map.width - 1);
-        let ny = (g.y + dy).clamp(0, self.map.height - 1);
-        g.x = nx;
-        g.y = ny;
+        let meters = map::meters_per_tile(&self.map, g.zoom);
+        let jump = if dx.abs() > 1 || dy.abs() > 1 { 5.0 } else { 1.0 };
+        let (dlon, dlat) = map::step_deg(g.lat, meters * jump);
+        let lon = g.lon + dlon * (dx.signum() as f64);
+        let lat = g.lat - dlat * (dy.signum() as f64);
+        let (lon, lat) = map::clamp_kma(&self.map, lon, lat);
+        g.lon = lon;
+        g.lat = lat;
         if g.fuel > 0 && (dx != 0 || dy != 0) && g.gear == Gear::PurseSeine {
             g.fuel -= 1;
         }
@@ -373,8 +388,7 @@ impl App {
     pub fn move_camp(&mut self) {
         let Some(g) = self.game.as_ref() else { return };
         let gear = g.gear;
-        let (lon, lat) = tile_to_latlon(&self.map, g.x, g.y);
-        let near = nearest_site(lon, lat);
+        let near = nearest_site(g.lon, g.lat);
         let after = g.date >= NaiveDate::from_ymd_opt(2025, 9, 5).unwrap();
         if !near.camp || !gear_legal(gear, near.section, after) {
             if let Some(g) = self.game.as_mut() {
@@ -392,9 +406,8 @@ impl App {
         let Some(g) = self.game.as_mut() else { return };
         g.cash -= 40_000;
         g.camp_id = near.id.to_string();
-        let (x, y) = latlon_to_tile(&self.map, near.lon, near.lat);
-        g.x = x;
-        g.y = y;
+        g.lon = near.lon;
+        g.lat = near.lat;
         g.company.day_at_camp(true);
         Self::push_log(
             g,
@@ -459,14 +472,15 @@ impl App {
             .unwrap_or("?");
         vec![
             format!(
-                "{}  {} {}   camp {}   here {} {} ({})",
+                "{}  {} {}   camp {}   here {} {} ({})   zoom {}  +/-",
                 g.date.format("%a %d %b 2025"),
                 g.gear.permit_code(),
                 g.gear.name(),
                 camp,
                 section.map(|s| s.name()).unwrap_or("?"),
                 open,
-                legal
+                legal,
+                map::zoom_name(g.zoom)
             ),
             format!(
                 "cash {}  hold {} fish  landed {}  food {}d  fuel {}  morale {}  town/play {}  crew {}",
@@ -504,5 +518,30 @@ mod tests {
             .iter()
             .any(|l| l.to_ascii_lowercase().contains("closed")));
         assert_eq!(g.hold.total(), 0);
+    }
+
+    #[test]
+    fn zoom_keeps_camp_and_legal_water() {
+        let mut app = App::new(3);
+        app.pick_gear = 0;
+        app.pick_site = 0;
+        app.start_game();
+        let camp = app.camp().unwrap();
+        {
+            let g = app.game.as_ref().unwrap();
+            assert!((g.lon - camp.lon).abs() < 1e-6);
+            assert!(app.on_camp());
+        }
+        app.zoom_out();
+        app.zoom_out();
+        assert_eq!(app.game.as_ref().unwrap().zoom, 0);
+        assert!(app.on_camp());
+        app.zoom_in();
+        app.zoom_in();
+        app.zoom_in();
+        assert_eq!(app.game.as_ref().unwrap().zoom, 2);
+        assert!(app.on_camp());
+        let section = app.here_section().unwrap();
+        assert!(gear_legal(Gear::Setnet, section, false));
     }
 }
